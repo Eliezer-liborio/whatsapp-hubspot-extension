@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "WhatsApp para HubSpot CRM",
-  "version": "1.0.0",
-  "description": "Exporta conversas do WhatsApp Web para a timeline do HubSpot CRM.",
+  "version": "2.0.0",
+  "description": "Exporta conversas do WhatsApp Web para a timeline do HubSpot CRM com 1 clique.",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
-    "https://web.whatsapp.com/*"
+    "https://web.whatsapp.com/*",
+    "http://localhost:3000/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -17,7 +19,8 @@
     {
       "matches": ["https://web.whatsapp.com/*"],
       "js": ["content.js"],
-      "css": ["content.css"]
+      "css": ["content.css"],
+      "run_at": "document_idle"
     }
   ],
   "action": {

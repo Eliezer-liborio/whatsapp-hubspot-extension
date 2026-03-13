@@ -4,76 +4,107 @@
   <meta charset="utf-8">
   <title>WhatsApp → HubSpot</title>
   <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
       width: 300px;
       font-family: Arial, sans-serif;
-      padding: 15px;
-      background-color: #f5f8fa;
+      background: #f5f8fa;
       color: #33475b;
+      padding: 16px;
     }
-    h2 {
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .header img {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+    }
+
+    .header h2 {
       color: #ff7a59;
-      font-size: 18px;
-      margin-top: 0;
-      text-align: center;
+      font-size: 16px;
     }
-    .container {
+
+    .card {
       background: white;
-      padding: 15px;
+      padding: 14px;
       border-radius: 8px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      margin-bottom: 10px;
     }
+
     .info {
-      font-size: 14px;
-      margin-bottom: 15px;
-      line-height: 1.4;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #516f90;
+      margin-bottom: 12px;
     }
+
     button {
       width: 100%;
-      background-color: #ff7a59;
+      background: #ff7a59;
       color: white;
       border: none;
       padding: 10px;
-      border-radius: 4px;
+      border-radius: 6px;
       font-weight: bold;
       cursor: pointer;
       font-size: 14px;
-      transition: background 0.3s;
+      transition: background 0.2s;
     }
-    button:hover {
-      background-color: #e56b4d;
-    }
+
+    button:hover:not(:disabled) { background: #e56b4d; }
+    button:disabled { background: #aaa; cursor: not-allowed; }
+
     .status {
       margin-top: 10px;
       font-size: 12px;
       text-align: center;
-      color: #00a4bd;
-      display: none;
+      min-height: 18px;
     }
+
     .footer {
-      margin-top: 15px;
       font-size: 11px;
       text-align: center;
-      color: #7c98b6;
+      color: #99acc2;
+    }
+
+    #middlewareStatus {
+      font-size: 11px;
+      text-align: center;
+      margin-bottom: 8px;
     }
   </style>
 </head>
 <body>
-  <div class="container">
+
+  <div class="header">
+    <img src="icons/icon48.png" alt="Logo">
     <h2>WhatsApp → HubSpot</h2>
-    
-    <div class="info">
-      Abra uma conversa no WhatsApp Web e clique no botão abaixo para salvar o histórico na timeline do cliente no HubSpot CRM.
-    </div>
-    
-    <button id="exportBtn">Exportar Conversa Atual</button>
-    <div id="statusMsg" class="status">Processando...</div>
   </div>
-  
+
+  <div class="card">
+    <div id="middlewareStatus">🔄 Verificando middleware...</div>
+
+    <p class="info">
+      Abra uma conversa no WhatsApp Web e clique abaixo para salvar o histórico na timeline do cliente no HubSpot CRM.
+    </p>
+
+    <button id="exportBtn">📤 Exportar Conversa Atual</button>
+    <div id="statusMsg" class="status"></div>
+  </div>
+
   <div class="footer">
-    Integração via Middleware Node.js
+    Middleware Node.js · HubSpot CRM API v3
   </div>
-  
+
   <script src="popup.js"></script>
 </body>
 </html>

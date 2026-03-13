@@ -1,25 +1,20 @@
 {
   "name": "whatsapp-hubspot-middleware",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Middleware Node.js para integração WhatsApp Web com HubSpot CRM",
-  "main": "middleware-example.js",
+  "main": "middleware.js",
   "scripts": {
-    "start": "node middleware-example.js",
-    "dev": "nodemon middleware-example.js"
+    "start": "node middleware.js",
+    "dev": "nodemon middleware.js"
   },
-  "keywords": [
-    "whatsapp",
-    "hubspot",
-    "crm",
-    "integration"
-  ],
-  "author": "Seu Nome",
+  "keywords": ["whatsapp", "hubspot", "crm", "integration", "chrome-extension"],
+  "author": "WhatsApp CRM Connector",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
