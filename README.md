@@ -1,10 +1,10 @@
-# 📲 WhatsApp → HubSpot CRM Extension
+#  WhatsApp → HubSpot CRM Extension
 
 > Extensão para Chrome e Edge que exporta conversas do WhatsApp Web diretamente para a timeline do cliente no HubSpot CRM, com apenas **1 clique**.
 
 ---
 
-## 🎯 O que faz?
+##  O que faz?
 
 Ao abrir uma conversa no WhatsApp Web, um botão **"📤 Salvar no HubSpot"** é adicionado automaticamente ao header do chat. Com um clique, toda a conversa é capturada e registrada como uma **nota (NOTE)** na timeline do contato no HubSpot CRM.
 
@@ -22,7 +22,7 @@ HubSpot API → Timeline do Contato
 
 ---
 
-## 📦 Estrutura do Projeto
+##  Estrutura do Projeto
 
 ```
 whatsapp-hubspot-extension/
@@ -43,7 +43,7 @@ whatsapp-hubspot-extension/
 
 ---
 
-## 🚀 Instalação da Extensão
+##  Instalação da Extensão
 
 ### Pré-requisitos
 
@@ -68,7 +68,7 @@ whatsapp-hubspot-extension/
 
 5. Selecione a pasta `whatsapp-hubspot-extension`
 
-6. A extensão aparecerá na lista com o ícone ✅
+6. A extensão aparecerá na lista com o ícone 
 
 ### Passo a Passo — Microsoft Edge
 
@@ -90,7 +90,7 @@ whatsapp-hubspot-extension/
 
 ---
 
-## ⚙️ Configuração do Middleware (Integração Real com HubSpot)
+##  Configuração do Middleware (Integração Real com HubSpot)
 
 O middleware Node.js é responsável por **esconder o token do HubSpot** e realizar as chamadas à API com segurança.
 
@@ -126,18 +126,18 @@ O servidor estará disponível em `http://localhost:3000`.
 
 ---
 
-## 🔌 Como Usar
+##  Como Usar
 
 1. Acesse [WhatsApp Web](https://web.whatsapp.com) e faça login
 2. Abra qualquer conversa com um cliente
-3. Clique no botão **📤 Salvar no HubSpot** que aparece no header do chat
+3. Clique no botão ** Salvar no HubSpot** que aparece no header do chat
 4. Aguarde a confirmação — a conversa será salva na timeline do cliente no HubSpot
 
 Alternativamente, clique no **ícone da extensão** na barra de ferramentas e use o botão **"Exportar Conversa Atual"**.
 
 ---
 
-## 📋 Dados Capturados
+##  Dados Capturados
 
 A extensão registra os seguintes dados de cada conversa:
 
@@ -167,7 +167,7 @@ Qual o valor?
 
 ---
 
-## 🔐 Segurança
+##  Segurança
 
 - O token do HubSpot **nunca é exposto** no código da extensão
 - Toda comunicação com a API do HubSpot passa pelo middleware Node.js
@@ -175,7 +175,7 @@ Qual o valor?
 
 ---
 
-## 🐛 Solução de Problemas
+##  Solução de Problemas
 
 | Problema | Causa | Solução |
 |----------|-------|---------|
@@ -188,7 +188,7 @@ Para ver logs de erro, abra o **DevTools** (F12) na aba do WhatsApp Web.
 
 ---
 
-## 🔄 Roadmap
+##  Roadmap
 
 - [x] Captura de mensagens do WhatsApp Web
 - [x] Botão injetado no header do chat
@@ -201,13 +201,13 @@ Para ver logs de erro, abra o **DevTools** (F12) na aba do WhatsApp Web.
 
 ---
 
-## 📄 Licença
+##  Licença
 
 Distribuído sob a licença MIT. Veja `LICENSE` para mais informações.
 
 ---
 
-## 🤝 Contribuição
+##  Contribuição
 
 Contribuições são bem-vindas! Sinta-se à vontade para abrir uma _issue_ ou enviar um _pull request_.
 
