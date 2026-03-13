@@ -5,7 +5,7 @@ const MIDDLEWARE_URL = 'http://localhost:3000/api/whatsapp-to-hubspot';
 const BTN_ID = 'hubspot-save-btn';
 
 // ─────────────────────────────────────────────
-// Cria o botão fixo assim que a página carregar
+// Cria o botão fixo
 // ─────────────────────────────────────────────
 function createFixedButton() {
   if (document.getElementById(BTN_ID)) return;
@@ -60,44 +60,41 @@ function createFixedButton() {
 let currentColor = '#FF7A59';
 
 // ─────────────────────────────────────────────
-// Verifica se uma string é um número de telefone válido
+// Verifica se uma string parece um telefone valido
 // ─────────────────────────────────────────────
-function isValidPhone(str) {
+function looksLikePhone(str) {
   if (!str) return false;
-  // Remove tudo que não é dígito ou +
-  const cleaned = str.replace(/[^\d+]/g, '');
-  // Telefone válido: começa com + ou tem entre 8 e 15 dígitos
-  return /^\+?\d{8,15}$/.test(cleaned);
-}
-
-function cleanPhone(str) {
-  return str.replace(/[^\d+]/g, '');
+  const digits = str.replace(/\D/g, '');
+  return digits.length >= 8 && digits.length <= 15;
 }
 
 // ─────────────────────────────────────────────
 // Captura nome e telefone do contato
+// Estrategia: busca o numero diretamente nas
+// mensagens (campo data-pre-plain-text) e no header
 // ─────────────────────────────────────────────
 function getContactInfo() {
-  // ── Captura o NOME ──
-  // Tenta vários seletores usados pelo WhatsApp pessoal e Business
+  let name = null;
+  let phone = null;
+
+  // ── NOME: tenta varios seletores ──
   const nameSelectors = [
-    // WhatsApp Business
     'span[data-testid="conversation-info-header-chat-title"]',
-    // WhatsApp pessoal (header da conversa)
     '#main header span[dir="auto"]:first-of-type',
     '#main header div[data-testid="conversation-info-header"] span[dir="auto"]',
-    // Genérico
     'header span[dir="auto"]',
     'div[data-testid="conversation-header"] span[dir="auto"]',
   ];
 
-  let name = null;
   for (const sel of nameSelectors) {
     const els = document.querySelectorAll(sel);
     for (const el of els) {
       const txt = el.innerText.trim();
-      // Ignora textos muito curtos, status ("online", "digitando...") e vazios
-      if (txt && txt.length > 1 && !['online', 'offline', 'digitando...', 'gravando áudio...'].includes(txt.toLowerCase())) {
+      const lower = txt.toLowerCase();
+      if (
+        txt.length > 1 &&
+        !['online', 'offline', 'digitando...', 'gravando áudio...', 'gravando audio...'].includes(lower)
+      ) {
         name = txt;
         break;
       }
@@ -105,44 +102,51 @@ function getContactInfo() {
     if (name) break;
   }
 
-  // ── Captura o TELEFONE ──
-  // Estratégia 1: subtítulo do header (ex: "+55 11 99999-9999")
+  // ── TELEFONE: estrategia 1 — subtitulo do header ──
   const subtitleSelectors = [
     'span[data-testid="conversation-info-header-subtitle"]',
     '#main header span[dir="auto"]:nth-of-type(2)',
     'header span[title]',
-    'div[data-testid="conversation-info-header"] span:nth-child(2)',
   ];
 
-  let phone = null;
   for (const sel of subtitleSelectors) {
     const el = document.querySelector(sel);
     if (el) {
       const txt = el.innerText.trim();
-      if (isValidPhone(txt)) {
-        phone = cleanPhone(txt);
+      if (looksLikePhone(txt)) {
+        phone = txt;
         break;
       }
     }
   }
 
-  // Estratégia 2: se o próprio nome é um número (contato sem nome salvo)
-  if (!phone && name && isValidPhone(name)) {
-    phone = cleanPhone(name);
+  // ── TELEFONE: estrategia 2 — nome e o proprio numero ──
+  if (!phone && name && looksLikePhone(name)) {
+    phone = name;
   }
 
-  // Estratégia 3: buscar número no título da página
+  // ── TELEFONE: estrategia 3 — busca em data-pre-plain-text das mensagens ──
+  // O WhatsApp coloca o numero no atributo data-pre-plain-text no formato:
+  // "[HH:MM, DD/MM/YYYY] +55 11 99999-9999:"
   if (!phone) {
-    const titleMatch = document.title.match(/\+?[\d\s\-().]{10,}/);
-    if (titleMatch && isValidPhone(titleMatch[0])) {
-      phone = cleanPhone(titleMatch[0]);
+    const copyables = document.querySelectorAll('[data-pre-plain-text]');
+    for (const el of copyables) {
+      const preText = el.getAttribute('data-pre-plain-text') || '';
+      // Extrai o numero do formato "[hora, data] numero:"
+      const match = preText.match(/\]\s*(\+?[\d\s\-().]{8,})\s*:/);
+      if (match && looksLikePhone(match[1])) {
+        phone = match[1].trim();
+        break;
+      }
     }
   }
 
-  // Estratégia 4: buscar na URL atual (WhatsApp às vezes coloca o número na URL)
+  // ── TELEFONE: estrategia 4 — titulo da pagina ──
   if (!phone) {
-    const urlMatch = window.location.href.match(/phone=(\+?[\d]+)/);
-    if (urlMatch) phone = urlMatch[1];
+    const titleMatch = document.title.match(/(\+?[\d\s\-().]{10,})/);
+    if (titleMatch && looksLikePhone(titleMatch[1])) {
+      phone = titleMatch[1].trim();
+    }
   }
 
   return { name: name || 'Desconhecido', phone };
@@ -154,38 +158,40 @@ function getContactInfo() {
 function getMessages() {
   const messages = [];
 
-  // Tenta múltiplos seletores para compatibilidade
-  const msgSelectors = [
-    'div[data-testid="msg-container"]',
-    'div.message-in',
-    'div.message-out',
-    'div[class*="message-"]',
-  ];
-
-  let msgElements = [];
-  for (const sel of msgSelectors) {
-    const found = document.querySelectorAll(sel);
-    if (found.length > 0) {
-      msgElements = [...found];
-      break;
-    }
-  }
-
-  // Fallback: busca por copyable-text (presente em todas as versões)
-  if (msgElements.length === 0) {
-    const copyables = document.querySelectorAll('[data-pre-plain-text]');
+  // Metodo 1: data-pre-plain-text (mais confiavel, presente em todas as versoes)
+  const copyables = document.querySelectorAll('[data-pre-plain-text]');
+  if (copyables.length > 0) {
     copyables.forEach(el => {
       const preText = el.getAttribute('data-pre-plain-text') || '';
       const timeMatch = preText.match(/\[(\d{2}:\d{2})/);
       const time = timeMatch ? timeMatch[1] : '';
-      const textEl = el.querySelector('span.selectable-text') || el;
+
+      // Detecta se e mensagem enviada (message-out) ou recebida
+      const isOut = !!el.closest('div.message-out') ||
+                    !!el.closest('[data-testid="msg-container-out"]') ||
+                    !!el.closest('div[class*="_akbu"]');
+
+      const textEl =
+        el.querySelector('span[data-testid="msg-text"]') ||
+        el.querySelector('span.selectable-text') ||
+        el;
+
       const txt = textEl.innerText.trim();
       if (txt) {
-        messages.push({ text: txt, time, from: 'desconhecido' });
+        messages.push({
+          text: txt,
+          time,
+          from: isOut ? 'vendedor' : 'cliente',
+        });
       }
     });
     return messages;
   }
+
+  // Metodo 2: seletores de container de mensagem
+  const msgElements = document.querySelectorAll(
+    'div[data-testid="msg-container"], div.message-in, div.message-out'
+  );
 
   msgElements.forEach(el => {
     const textEl =
@@ -193,15 +199,8 @@ function getMessages() {
       el.querySelector('span.selectable-text') ||
       el.querySelector('.copyable-text span');
 
-    const timeEl =
-      el.querySelector("span[data-testid='msg-time']") ||
-      el.querySelector('span.x1c4vz4f') ||
-      el.querySelector('span[class*="time"]');
-
-    const isOut =
-      el.classList.contains('message-out') ||
-      el.getAttribute('data-testid') === 'msg-container-out' ||
-      !!el.closest('div[class*="out"]');
+    const timeEl = el.querySelector("span[data-testid='msg-time']");
+    const isOut  = el.classList.contains('message-out');
 
     if (textEl && textEl.innerText.trim()) {
       messages.push({
@@ -219,7 +218,7 @@ function getMessages() {
 // Ação do botão
 // ─────────────────────────────────────────────
 async function handleSave() {
-  const btn = document.getElementById(BTN_ID);
+  const btn     = document.getElementById(BTN_ID);
   const btnText = document.getElementById('hubspot-btn-text');
   if (!btn || !btnText) return;
 
@@ -303,7 +302,7 @@ function showToast(message, type = 'success') {
     box-shadow: 0 4px 16px rgba(0,0,0,0.3);
     opacity: 1;
     transition: opacity 0.4s;
-    max-width: 440px;
+    max-width: 480px;
     text-align: center;
   `;
 
@@ -311,7 +310,7 @@ function showToast(message, type = 'success') {
   setTimeout(() => {
     toast.style.opacity = '0';
     setTimeout(() => toast.remove(), 400);
-  }, 4000);
+  }, 5000);
 }
 
 // ─────────────────────────────────────────────

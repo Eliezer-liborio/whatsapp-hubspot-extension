@@ -1,5 +1,6 @@
 // middleware.js
 // Servidor Node.js para integracao WhatsApp Web com HubSpot CRM
+// Busca de contato: APENAS por numero de telefone
 
 require('dotenv').config();
 const express = require('express');
@@ -19,9 +20,11 @@ const headers = () => ({
 });
 
 // ─────────────────────────────────────────────
-// Gera todas as variantes de formato de telefone
-// Ex: 5566996215988 → ["5566996215988", "+5566996215988",
-//     "+55-66-99621-5988", "66996215988", "996215988"]
+// Gera todas as variantes de formato do numero
+// para cobrir como o HubSpot pode ter armazenado
+// Ex: "5566996215988" gera:
+//   5566996215988, +5566996215988,
+//   +55-66-99621-5988, 66996215988, 996215988
 // ─────────────────────────────────────────────
 function phoneVariants(phone) {
   if (!phone) return [];
@@ -36,148 +39,62 @@ function phoneVariants(phone) {
   // Com + na frente
   variants.add('+' + digits);
 
-  // Formato com hifens: +55-DDD-NNNNN-NNNN
+  // Formato com hifens para numeros brasileiros de 13 digitos (+55 + DDD + 9 digitos)
   if (digits.length === 13) {
-    // +55 + 2 DDD + 9 celular
-    const fmt = `+${digits.slice(0,2)}-${digits.slice(2,4)}-${digits.slice(4,9)}-${digits.slice(9)}`;
-    variants.add(fmt);
-    // Sem o 9 inicial do celular (8 digitos)
-    const fmt2 = `+${digits.slice(0,2)}-${digits.slice(2,4)}-${digits.slice(4,8)}-${digits.slice(8)}`;
-    variants.add(fmt2);
+    variants.add(`+${digits.slice(0,2)}-${digits.slice(2,4)}-${digits.slice(4,9)}-${digits.slice(9)}`);
   }
+  // Formato com hifens para 12 digitos (+55 + DDD + 8 digitos)
   if (digits.length === 12) {
-    // +55 + 2 DDD + 8 fixo
-    const fmt = `+${digits.slice(0,2)}-${digits.slice(2,4)}-${digits.slice(4,8)}-${digits.slice(8)}`;
-    variants.add(fmt);
+    variants.add(`+${digits.slice(0,2)}-${digits.slice(2,4)}-${digits.slice(4,8)}-${digits.slice(8)}`);
   }
 
-  // Sem o codigo do pais (55)
+  // Sem o codigo do pais 55
   if (digits.startsWith('55') && digits.length >= 10) {
     const sem55 = digits.slice(2);
     variants.add(sem55);
     variants.add('+55' + sem55);
+    variants.add('0' + sem55);
   }
 
-  // Ultimos 9 digitos (numero local com 9)
+  // Ultimos 9 digitos (numero local com o 9)
   if (digits.length >= 9) variants.add(digits.slice(-9));
-  // Ultimos 8 digitos (numero local sem 9)
+
+  // Ultimos 8 digitos (numero local sem o 9)
   if (digits.length >= 8) variants.add(digits.slice(-8));
 
   return [...variants];
 }
 
 // ─────────────────────────────────────────────
-// Busca contato por uma propriedade especifica
+// Busca contato no HubSpot APENAS por telefone
+// Testa os campos: phone e mobilephone
+// com todas as variantes de formato
 // ─────────────────────────────────────────────
-async function searchByProperty(prop, value) {
-  try {
-    const res = await axios.post(
-      `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
-      {
-        filterGroups: [{
-          filters: [{ propertyName: prop, operator: 'EQ', value: String(value) }]
-        }],
-        properties: ['firstname', 'lastname', 'phone', 'mobilephone', 'email'],
-        limit: 5
-      },
-      { headers: headers() }
-    );
-    return res.data.results || [];
-  } catch (e) {
-    return [];
-  }
-}
-
-// ─────────────────────────────────────────────
-// Busca contato no HubSpot por varias estrategias
-// ─────────────────────────────────────────────
-async function findContact(phone, name) {
+async function findContactByPhone(phone) {
   const variants = phoneVariants(phone);
 
-  // Estrategias 1 e 2: busca por todas as variantes de telefone
-  if (variants.length > 0) {
-    for (const variant of variants) {
-      for (const prop of ['phone', 'mobilephone']) {
-        const results = await searchByProperty(prop, variant);
-        if (results.length > 0) {
-          console.log('  Encontrado por: ' + prop + ' = ' + variant);
-          return results[0];
-        }
-      }
-    }
-  }
+  if (variants.length === 0) return null;
 
-  // Estrategia 3: busca por nome COMPLETO (firstname + lastname juntos)
-  // Exige que ambos coincidam para evitar falsos positivos
-  if (name && name !== 'Desconhecido') {
-    const parts = name.trim().split(/\s+/);
-
-    if (parts.length >= 2) {
-      const firstName = parts[0];
-      const lastName  = parts[parts.length - 1];
-
+  for (const variant of variants) {
+    for (const prop of ['phone', 'mobilephone']) {
       try {
         const res = await axios.post(
           `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
           {
             filterGroups: [{
-              filters: [
-                { propertyName: 'firstname', operator: 'CONTAINS_TOKEN', value: firstName },
-                { propertyName: 'lastname',  operator: 'CONTAINS_TOKEN', value: lastName  }
-              ]
+              filters: [{ propertyName: prop, operator: 'EQ', value: variant }]
             }],
             properties: ['firstname', 'lastname', 'phone', 'mobilephone', 'email'],
-            limit: 5
+            limit: 1
           },
           { headers: headers() }
         );
         if (res.data.results?.length > 0) {
-          console.log('  Encontrado por: nome completo = ' + firstName + ' ' + lastName);
+          console.log('  Encontrado por: ' + prop + ' = "' + variant + '"');
           return res.data.results[0];
         }
-      } catch (e) { /* continua */ }
+      } catch (e) { /* tenta proxima variante */ }
     }
-
-    // Estrategia 4: busca pelo nome completo no campo "fullname" (se existir)
-    // Tenta buscar por firstname com o nome inteiro
-    try {
-      const res = await axios.post(
-        `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
-        {
-          filterGroups: [{
-            filters: [{ propertyName: 'firstname', operator: 'EQ', value: parts[0] }]
-          }],
-          properties: ['firstname', 'lastname', 'phone', 'mobilephone', 'email'],
-          limit: 10
-        },
-        { headers: headers() }
-      );
-
-      if (res.data.results?.length > 0) {
-        // Se encontrou apenas 1, usa ele
-        if (res.data.results.length === 1) {
-          console.log('  Encontrado por: unico contato com firstname = ' + parts[0]);
-          return res.data.results[0];
-        }
-
-        // Se encontrou varios, tenta filtrar pelo sobrenome
-        if (parts.length >= 2) {
-          const lastName = parts[parts.length - 1].toLowerCase();
-          const match = res.data.results.find(c => {
-            const ln = (c.properties?.lastname || '').toLowerCase();
-            return ln.includes(lastName) || lastName.includes(ln);
-          });
-          if (match) {
-            console.log('  Encontrado por: firstname + filtro lastname = ' + parts[0] + ' ' + parts[parts.length - 1]);
-            return match;
-          }
-        }
-
-        // Nao conseguiu distinguir — nao retorna para evitar falso positivo
-        console.log('  ATENCAO: ' + res.data.results.length + ' contatos com nome "' + parts[0] + '" — nao e possivel identificar sem telefone');
-        return null;
-      }
-    } catch (e) { /* continua */ }
   }
 
   return null;
@@ -200,7 +117,7 @@ function formatConversation(contactName, messages) {
   text += `----------------------------------\n\n`;
 
   messages.forEach(msg => {
-    const sender = msg.from === 'vendedor' ? 'Vendedor' : msg.from === 'cliente' ? 'Cliente' : 'Participante';
+    const sender = msg.from === 'vendedor' ? 'Vendedor' : 'Cliente';
     const time   = msg.time ? `[${msg.time}] ` : '';
     text += `${time}${sender}:\n${msg.text}\n\n`;
   });
@@ -236,51 +153,55 @@ app.post('/api/whatsapp-to-hubspot', async (req, res) => {
   try {
     const { contactName, phone, messages } = req.body;
 
-    if (!contactName || !messages || messages.length === 0) {
-      return res.status(400).json({ success: false, error: 'Dados invalidos: envie contactName e messages.' });
+    if (!messages || messages.length === 0) {
+      return res.status(400).json({ success: false, error: 'Nenhuma mensagem encontrada. Abra uma conversa antes de salvar.' });
     }
 
-    const variants = phoneVariants(phone);
+    const digits = phone ? phone.replace(/\D/g, '') : '';
 
     console.log('');
     console.log('Nova exportacao recebida');
-    console.log('  Contato : ' + contactName);
+    console.log('  Contato : ' + (contactName || 'Desconhecido'));
     console.log('  Telefone: ' + (phone || 'nao capturado'));
-    if (variants.length > 0) {
-      console.log('  Variantes: ' + variants.slice(0, 4).join(', '));
-    }
     console.log('  Msgs    : ' + messages.length);
 
-    const contact = await findContact(phone, contactName);
+    // Sem telefone — nao e possivel buscar
+    if (!digits || digits.length < 8) {
+      console.log('  ERRO: Telefone nao capturado ou invalido');
+      return res.status(400).json({
+        success: false,
+        error: 'Numero de telefone nao encontrado nesta conversa. O contato precisa ter o numero visivel no WhatsApp.'
+      });
+    }
+
+    const variants = phoneVariants(phone);
+    console.log('  Formatos testados: ' + variants.join(', '));
+
+    const contact = await findContactByPhone(phone);
 
     if (!contact) {
       console.log('  ATENCAO: Contato nao encontrado no HubSpot');
-
-      const dica = variants.length === 0
-        ? 'O telefone nao foi capturado. Certifique-se de que o contato esta salvo com o nome completo no WhatsApp.'
-        : `Verifique se o contato tem o telefone cadastrado no HubSpot. Formatos tentados: ${variants.slice(0,3).join(', ')}`;
-
       return res.status(404).json({
         success: false,
-        error: `Contato "${contactName}" nao encontrado no HubSpot. ${dica}`
+        error: `Contato com telefone ${phone} nao encontrado no HubSpot. Verifique se o numero esta cadastrado no campo "Telefone" ou "Celular" do contato.`
       });
     }
 
     const fullName = [
       contact.properties?.firstname,
       contact.properties?.lastname
-    ].filter(Boolean).join(' ') || contactName;
+    ].filter(Boolean).join(' ') || contactName || 'Contato';
 
     console.log('  Contato encontrado: ' + fullName + ' (ID ' + contact.id + ')');
 
-    const noteBody = formatConversation(contactName, messages);
+    const noteBody = formatConversation(contactName || fullName, messages);
     const note     = await createNote(contact.id, noteBody);
 
     console.log('  Nota criada: ID ' + note.id);
 
     return res.json({
       success: true,
-      message: `Conversa salva com sucesso na timeline de ${fullName}!`,
+      message: `Conversa salva na timeline de ${fullName}!`,
       contactId: contact.id,
       contactName: fullName,
       noteId: note.id
