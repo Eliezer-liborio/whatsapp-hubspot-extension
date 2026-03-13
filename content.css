@@ -1,0 +1,18 @@
+/* content.css */
+.hubspot-btn {
+  background-color: #ff7a59; /* Cor do HubSpot */
+  color: white;
+  border: none;
+  border-radius: 5px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  margin-left: 15px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: background-color 0.3s;
+}
+
+.hubspot-btn:hover {
+  background-color: #e56b4d;
+}
