@@ -1,5 +1,5 @@
 // content.js — WhatsApp para HubSpot CRM
-// Botão fixo no topo direito da conversa — funciona no WhatsApp pessoal e Business
+// Botão fixo no topo direito — funciona no WhatsApp pessoal e Business
 
 const MIDDLEWARE_URL = 'http://localhost:3000/api/whatsapp-to-hubspot';
 const BTN_ID = 'hubspot-save-btn';
@@ -14,12 +14,10 @@ function createFixedButton() {
   btn.id = BTN_ID;
   btn.title = 'Salvar conversa no HubSpot CRM';
 
-  // Ícone SVG HubSpot (sprocket)
   const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>`;
 
   btn.innerHTML = svgIcon + '<span id="hubspot-btn-text">Salvar no HubSpot</span>';
 
-  // Estilo: fixo no topo direito, acima do header do WhatsApp
   btn.style.cssText = `
     position: fixed;
     top: 12px;
@@ -44,7 +42,6 @@ function createFixedButton() {
     user-select: none;
   `;
 
-  // Hover
   btn.addEventListener('mouseenter', () => {
     btn.style.backgroundColor = '#e8623a';
     btn.style.transform = 'scale(1.05)';
@@ -57,40 +54,95 @@ function createFixedButton() {
   });
 
   btn.addEventListener('click', handleSave);
-
   document.body.appendChild(btn);
 }
 
 let currentColor = '#FF7A59';
 
 // ─────────────────────────────────────────────
+// Verifica se uma string é um número de telefone válido
+// ─────────────────────────────────────────────
+function isValidPhone(str) {
+  if (!str) return false;
+  // Remove tudo que não é dígito ou +
+  const cleaned = str.replace(/[^\d+]/g, '');
+  // Telefone válido: começa com + ou tem entre 8 e 15 dígitos
+  return /^\+?\d{8,15}$/.test(cleaned);
+}
+
+function cleanPhone(str) {
+  return str.replace(/[^\d+]/g, '');
+}
+
+// ─────────────────────────────────────────────
 // Captura nome e telefone do contato
 // ─────────────────────────────────────────────
 function getContactInfo() {
+  // ── Captura o NOME ──
+  // Tenta vários seletores usados pelo WhatsApp pessoal e Business
   const nameSelectors = [
+    // WhatsApp Business
     'span[data-testid="conversation-info-header-chat-title"]',
-    'div[data-testid="conversation-header"] span[dir="auto"]',
+    // WhatsApp pessoal (header da conversa)
+    '#main header span[dir="auto"]:first-of-type',
+    '#main header div[data-testid="conversation-info-header"] span[dir="auto"]',
+    // Genérico
     'header span[dir="auto"]',
-    '#main header span[dir="auto"]',
-    'div._amid span[dir="auto"]',
+    'div[data-testid="conversation-header"] span[dir="auto"]',
   ];
 
   let name = null;
   for (const sel of nameSelectors) {
+    const els = document.querySelectorAll(sel);
+    for (const el of els) {
+      const txt = el.innerText.trim();
+      // Ignora textos muito curtos, status ("online", "digitando...") e vazios
+      if (txt && txt.length > 1 && !['online', 'offline', 'digitando...', 'gravando áudio...'].includes(txt.toLowerCase())) {
+        name = txt;
+        break;
+      }
+    }
+    if (name) break;
+  }
+
+  // ── Captura o TELEFONE ──
+  // Estratégia 1: subtítulo do header (ex: "+55 11 99999-9999")
+  const subtitleSelectors = [
+    'span[data-testid="conversation-info-header-subtitle"]',
+    '#main header span[dir="auto"]:nth-of-type(2)',
+    'header span[title]',
+    'div[data-testid="conversation-info-header"] span:nth-child(2)',
+  ];
+
+  let phone = null;
+  for (const sel of subtitleSelectors) {
     const el = document.querySelector(sel);
-    if (el && el.innerText.trim()) {
-      name = el.innerText.trim();
-      break;
+    if (el) {
+      const txt = el.innerText.trim();
+      if (isValidPhone(txt)) {
+        phone = cleanPhone(txt);
+        break;
+      }
     }
   }
 
-  const subtitleEl = document.querySelector(
-    'span[data-testid="conversation-info-header-subtitle"], header span[title]'
-  );
-  let phone = subtitleEl ? subtitleEl.innerText.replace(/\s/g, '') : null;
+  // Estratégia 2: se o próprio nome é um número (contato sem nome salvo)
+  if (!phone && name && isValidPhone(name)) {
+    phone = cleanPhone(name);
+  }
 
-  if (!phone && name && /^\+?[\d\s\-().]+$/.test(name)) {
-    phone = name.replace(/\D/g, '');
+  // Estratégia 3: buscar número no título da página
+  if (!phone) {
+    const titleMatch = document.title.match(/\+?[\d\s\-().]{10,}/);
+    if (titleMatch && isValidPhone(titleMatch[0])) {
+      phone = cleanPhone(titleMatch[0]);
+    }
+  }
+
+  // Estratégia 4: buscar na URL atual (WhatsApp às vezes coloca o número na URL)
+  if (!phone) {
+    const urlMatch = window.location.href.match(/phone=(\+?[\d]+)/);
+    if (urlMatch) phone = urlMatch[1];
   }
 
   return { name: name || 'Desconhecido', phone };
@@ -102,9 +154,38 @@ function getContactInfo() {
 function getMessages() {
   const messages = [];
 
-  const msgElements = document.querySelectorAll(
-    'div[data-testid="msg-container"], div.message-in, div.message-out'
-  );
+  // Tenta múltiplos seletores para compatibilidade
+  const msgSelectors = [
+    'div[data-testid="msg-container"]',
+    'div.message-in',
+    'div.message-out',
+    'div[class*="message-"]',
+  ];
+
+  let msgElements = [];
+  for (const sel of msgSelectors) {
+    const found = document.querySelectorAll(sel);
+    if (found.length > 0) {
+      msgElements = [...found];
+      break;
+    }
+  }
+
+  // Fallback: busca por copyable-text (presente em todas as versões)
+  if (msgElements.length === 0) {
+    const copyables = document.querySelectorAll('[data-pre-plain-text]');
+    copyables.forEach(el => {
+      const preText = el.getAttribute('data-pre-plain-text') || '';
+      const timeMatch = preText.match(/\[(\d{2}:\d{2})/);
+      const time = timeMatch ? timeMatch[1] : '';
+      const textEl = el.querySelector('span.selectable-text') || el;
+      const txt = textEl.innerText.trim();
+      if (txt) {
+        messages.push({ text: txt, time, from: 'desconhecido' });
+      }
+    });
+    return messages;
+  }
 
   msgElements.forEach(el => {
     const textEl =
@@ -112,8 +193,15 @@ function getMessages() {
       el.querySelector('span.selectable-text') ||
       el.querySelector('.copyable-text span');
 
-    const timeEl = el.querySelector("span[data-testid='msg-time']");
-    const isOut = el.classList.contains('message-out');
+    const timeEl =
+      el.querySelector("span[data-testid='msg-time']") ||
+      el.querySelector('span.x1c4vz4f') ||
+      el.querySelector('span[class*="time"]');
+
+    const isOut =
+      el.classList.contains('message-out') ||
+      el.getAttribute('data-testid') === 'msg-container-out' ||
+      !!el.closest('div[class*="out"]');
 
     if (textEl && textEl.innerText.trim()) {
       messages.push({
@@ -229,10 +317,8 @@ function showToast(message, type = 'success') {
 // ─────────────────────────────────────────────
 // Inicialização
 // ─────────────────────────────────────────────
-// Cria o botão imediatamente
 createFixedButton();
 
-// Garante que o botão persiste mesmo com re-renders do WhatsApp
 const observer = new MutationObserver(() => {
   if (!document.getElementById(BTN_ID)) {
     createFixedButton();

@@ -19,43 +19,140 @@ const headers = () => ({
 });
 
 // ─────────────────────────────────────────────
-// 1. Buscar contato pelo telefone ou nome
+// Normaliza numero de telefone para busca
+// Remove tudo que nao e digito, mantem o +
+// ─────────────────────────────────────────────
+function normalizePhone(phone) {
+  if (!phone) return null;
+  const cleaned = phone.replace(/[^\d]/g, '');
+  // Valida: precisa ter pelo menos 8 digitos
+  if (cleaned.length < 8) return null;
+  return cleaned;
+}
+
+// ─────────────────────────────────────────────
+// Busca contato no HubSpot por varias estrategias
 // ─────────────────────────────────────────────
 async function findContact(phone, name) {
-  if (phone) {
-    const res = await axios.post(
-      `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
-      {
-        filterGroups: [{
-          filters: [{ propertyName: 'phone', operator: 'EQ', value: phone }]
-        }],
-        properties: ['firstname', 'lastname', 'phone', 'email']
-      },
-      { headers: headers() }
-    );
-    if (res.data.results?.length > 0) return res.data.results[0];
+  const phoneClean = normalizePhone(phone);
+
+  // Estrategia 1: busca pelo campo "phone" (telefone principal)
+  if (phoneClean) {
+    try {
+      const res = await axios.post(
+        `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
+        {
+          filterGroups: [{
+            filters: [{ propertyName: 'phone', operator: 'EQ', value: phoneClean }]
+          }],
+          properties: ['firstname', 'lastname', 'phone', 'mobilephone', 'email']
+        },
+        { headers: headers() }
+      );
+      if (res.data.results?.length > 0) {
+        console.log('  Encontrado por: campo phone = ' + phoneClean);
+        return res.data.results[0];
+      }
+    } catch (e) { /* continua */ }
+
+    // Estrategia 2: busca pelo campo "mobilephone" (celular)
+    try {
+      const res = await axios.post(
+        `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
+        {
+          filterGroups: [{
+            filters: [{ propertyName: 'mobilephone', operator: 'EQ', value: phoneClean }]
+          }],
+          properties: ['firstname', 'lastname', 'phone', 'mobilephone', 'email']
+        },
+        { headers: headers() }
+      );
+      if (res.data.results?.length > 0) {
+        console.log('  Encontrado por: campo mobilephone = ' + phoneClean);
+        return res.data.results[0];
+      }
+    } catch (e) { /* continua */ }
+
+    // Estrategia 3: busca com sufixo (ultimos 9 digitos) — para casos com DDI diferente
+    if (phoneClean.length >= 9) {
+      const suffix = phoneClean.slice(-9);
+      try {
+        const res = await axios.post(
+          `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
+          {
+            filterGroups: [
+              {
+                filters: [{ propertyName: 'phone', operator: 'CONTAINS_TOKEN', value: suffix }]
+              },
+              {
+                filters: [{ propertyName: 'mobilephone', operator: 'CONTAINS_TOKEN', value: suffix }]
+              }
+            ],
+            properties: ['firstname', 'lastname', 'phone', 'mobilephone', 'email']
+          },
+          { headers: headers() }
+        );
+        if (res.data.results?.length > 0) {
+          console.log('  Encontrado por: sufixo do telefone = ' + suffix);
+          return res.data.results[0];
+        }
+      } catch (e) { /* continua */ }
+    }
   }
 
-  if (name) {
-    const firstName = name.split(' ')[0];
-    const res = await axios.post(
-      `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
-      {
-        filterGroups: [{
-          filters: [{ propertyName: 'firstname', operator: 'CONTAINS_TOKEN', value: firstName }]
-        }],
-        properties: ['firstname', 'lastname', 'phone', 'email']
-      },
-      { headers: headers() }
-    );
-    if (res.data.results?.length > 0) return res.data.results[0];
+  // Estrategia 4: busca pelo nome completo
+  if (name && name !== 'Desconhecido') {
+    const parts = name.trim().split(/\s+/);
+    const firstName = parts[0];
+    const lastName  = parts.length > 1 ? parts[parts.length - 1] : null;
+
+    // Busca por nome completo (firstname + lastname)
+    if (lastName) {
+      try {
+        const res = await axios.post(
+          `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
+          {
+            filterGroups: [{
+              filters: [
+                { propertyName: 'firstname', operator: 'CONTAINS_TOKEN', value: firstName },
+                { propertyName: 'lastname',  operator: 'CONTAINS_TOKEN', value: lastName  }
+              ]
+            }],
+            properties: ['firstname', 'lastname', 'phone', 'mobilephone', 'email']
+          },
+          { headers: headers() }
+        );
+        if (res.data.results?.length > 0) {
+          console.log('  Encontrado por: nome completo = ' + firstName + ' ' + lastName);
+          return res.data.results[0];
+        }
+      } catch (e) { /* continua */ }
+    }
+
+    // Busca so pelo primeiro nome
+    try {
+      const res = await axios.post(
+        `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
+        {
+          filterGroups: [{
+            filters: [{ propertyName: 'firstname', operator: 'CONTAINS_TOKEN', value: firstName }]
+          }],
+          properties: ['firstname', 'lastname', 'phone', 'mobilephone', 'email']
+        },
+        { headers: headers() }
+      );
+      if (res.data.results?.length > 0) {
+        console.log('  Encontrado por: primeiro nome = ' + firstName);
+        return res.data.results[0];
+      }
+    } catch (e) { /* continua */ }
   }
 
   return null;
 }
 
 // ─────────────────────────────────────────────
-// 2. Formatar conversa como texto estruturado
+// Formatar conversa como texto estruturado
 // ─────────────────────────────────────────────
 function formatConversation(contactName, messages) {
   const date = new Date().toLocaleDateString('pt-BR', {
@@ -67,19 +164,20 @@ function formatConversation(contactName, messages) {
   text += `----------------------------------\n`;
   text += `Cliente: ${contactName}\n`;
   text += `Exportado em: ${date}\n`;
+  text += `Total de mensagens: ${messages.length}\n`;
   text += `----------------------------------\n\n`;
 
   messages.forEach(msg => {
-    const sender = msg.from === 'vendedor' ? 'Vendedor' : 'Cliente';
-    const time   = msg.time ? `[${msg.time}]` : '';
-    text += `${time} ${sender}:\n${msg.text}\n\n`;
+    const sender = msg.from === 'vendedor' ? 'Vendedor' : msg.from === 'cliente' ? 'Cliente' : 'Participante';
+    const time   = msg.time ? `[${msg.time}] ` : '';
+    text += `${time}${sender}:\n${msg.text}\n\n`;
   });
 
   return text;
 }
 
 // ─────────────────────────────────────────────
-// 3. Criar nota na timeline do contato
+// Criar nota na timeline do contato
 // ─────────────────────────────────────────────
 async function createNote(contactId, noteBody) {
   const res = await axios.post(
@@ -110,22 +208,30 @@ app.post('/api/whatsapp-to-hubspot', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Dados invalidos: envie contactName e messages.' });
     }
 
+    const phoneClean = normalizePhone(phone);
+
+    console.log('');
     console.log('Nova exportacao recebida');
     console.log('  Contato : ' + contactName);
-    console.log('  Telefone: ' + (phone || 'nao informado'));
+    console.log('  Telefone: ' + (phoneClean || 'nao capturado — buscando por nome'));
     console.log('  Msgs    : ' + messages.length);
 
-    const contact = await findContact(phone, contactName);
+    const contact = await findContact(phoneClean, contactName);
 
     if (!contact) {
-      console.log('  Contato nao encontrado no HubSpot');
+      console.log('  ATENCAO: Contato nao encontrado no HubSpot');
       return res.status(404).json({
         success: false,
-        error: `Contato "${contactName}" nao encontrado no HubSpot. Verifique se o numero ${phone} esta cadastrado.`
+        error: `Contato "${contactName}" nao encontrado no HubSpot. Verifique se o contato esta cadastrado com este nome ou telefone (${phoneClean || 'nao capturado'}).`
       });
     }
 
-    console.log('  Contato encontrado: ID ' + contact.id);
+    const fullName = [
+      contact.properties?.firstname,
+      contact.properties?.lastname
+    ].filter(Boolean).join(' ') || contactName;
+
+    console.log('  Contato encontrado: ' + fullName + ' (ID ' + contact.id + ')');
 
     const noteBody = formatConversation(contactName, messages);
     const note     = await createNote(contact.id, noteBody);
@@ -134,13 +240,15 @@ app.post('/api/whatsapp-to-hubspot', async (req, res) => {
 
     return res.json({
       success: true,
-      message: `Conversa salva com sucesso na timeline de ${contactName}!`,
+      message: `Conversa salva com sucesso na timeline de ${fullName}!`,
       contactId: contact.id,
+      contactName: fullName,
       noteId: note.id
     });
 
   } catch (err) {
-    console.error('Erro: ' + (err.response?.data?.message || err.message));
+    const errMsg = err.response?.data?.message || err.message;
+    console.error('  ERRO: ' + errMsg);
 
     if (err.response?.status === 401) {
       return res.status(401).json({ success: false, error: 'Token invalido ou expirado. Verifique o arquivo .env' });
@@ -152,7 +260,7 @@ app.post('/api/whatsapp-to-hubspot', async (req, res) => {
     return res.status(500).json({
       success: false,
       error: 'Erro interno ao processar a conversa.',
-      details: err.response?.data?.message || err.message
+      details: errMsg
     });
   }
 });
