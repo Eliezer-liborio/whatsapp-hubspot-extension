@@ -1,28 +1,18 @@
 // middleware.js
-// Servidor Node.js para integração WhatsApp Web → HubSpot CRM
-// Requer: npm install express axios cors dotenv
+// Servidor Node.js para integracao WhatsApp Web com HubSpot CRM
 
 require('dotenv').config();
 const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
+const axios   = require('axios');
+const cors    = require('cors');
 
 const app = express();
 app.use(express.json());
-
-// Permite requisições da extensão Chrome/Edge
-app.use(cors({
-  origin: '*', // Em produção, restrinja ao ID da extensão
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type']
-}));
+app.use(cors({ origin: '*', methods: ['GET', 'POST'], allowedHeaders: ['Content-Type'] }));
 
 const HUBSPOT_TOKEN = process.env.HUBSPOT_API_KEY;
 const HUBSPOT_BASE  = 'https://api.hubapi.com';
 
-// ─────────────────────────────────────────────
-// Cabeçalho padrão para todas as chamadas
-// ─────────────────────────────────────────────
 const headers = () => ({
   'Authorization': `Bearer ${HUBSPOT_TOKEN}`,
   'Content-Type': 'application/json'
@@ -32,17 +22,12 @@ const headers = () => ({
 // 1. Buscar contato pelo telefone ou nome
 // ─────────────────────────────────────────────
 async function findContact(phone, name) {
-  // Tenta primeiro pelo telefone
   if (phone) {
     const res = await axios.post(
       `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
       {
         filterGroups: [{
-          filters: [{
-            propertyName: 'phone',
-            operator: 'EQ',
-            value: phone
-          }]
+          filters: [{ propertyName: 'phone', operator: 'EQ', value: phone }]
         }],
         properties: ['firstname', 'lastname', 'phone', 'email']
       },
@@ -51,18 +36,13 @@ async function findContact(phone, name) {
     if (res.data.results?.length > 0) return res.data.results[0];
   }
 
-  // Fallback: busca pelo primeiro nome
   if (name) {
     const firstName = name.split(' ')[0];
     const res = await axios.post(
       `${HUBSPOT_BASE}/crm/v3/objects/contacts/search`,
       {
         filterGroups: [{
-          filters: [{
-            propertyName: 'firstname',
-            operator: 'CONTAINS_TOKEN',
-            value: firstName
-          }]
+          filters: [{ propertyName: 'firstname', operator: 'CONTAINS_TOKEN', value: firstName }]
         }],
         properties: ['firstname', 'lastname', 'phone', 'email']
       },
@@ -83,14 +63,14 @@ function formatConversation(contactName, messages) {
     hour: '2-digit', minute: '2-digit'
   });
 
-  let text = `📱 CONVERSA WHATSAPP\n`;
-  text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  let text = `CONVERSA WHATSAPP\n`;
+  text += `----------------------------------\n`;
   text += `Cliente: ${contactName}\n`;
   text += `Exportado em: ${date}\n`;
-  text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+  text += `----------------------------------\n\n`;
 
   messages.forEach(msg => {
-    const sender = msg.from === 'vendedor' ? '🧑‍💼 Vendedor' : '👤 Cliente';
+    const sender = msg.from === 'vendedor' ? 'Vendedor' : 'Cliente';
     const time   = msg.time ? `[${msg.time}]` : '';
     text += `${time} ${sender}:\n${msg.text}\n\n`;
   });
@@ -111,10 +91,7 @@ async function createNote(contactId, noteBody) {
       },
       associations: [{
         to: { id: contactId },
-        types: [{
-          associationCategory: 'HUBSPOT_DEFINED',
-          associationTypeId: 202  // nota → contato
-        }]
+        types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }]
       }]
     },
     { headers: headers() }
@@ -124,43 +101,36 @@ async function createNote(contactId, noteBody) {
 
 // ─────────────────────────────────────────────
 // ENDPOINT PRINCIPAL
-// POST /api/whatsapp-to-hubspot
 // ─────────────────────────────────────────────
 app.post('/api/whatsapp-to-hubspot', async (req, res) => {
   try {
     const { contactName, phone, messages } = req.body;
 
-    // Validação básica
     if (!contactName || !messages || messages.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Dados inválidos: envie contactName e messages.'
-      });
+      return res.status(400).json({ success: false, error: 'Dados invalidos: envie contactName e messages.' });
     }
 
-    console.log(`\n📥 Nova exportação recebida`);
-    console.log(`   Contato : ${contactName}`);
-    console.log(`   Telefone: ${phone || 'não informado'}`);
-    console.log(`   Msgs    : ${messages.length}`);
+    console.log('Nova exportacao recebida');
+    console.log('  Contato : ' + contactName);
+    console.log('  Telefone: ' + (phone || 'nao informado'));
+    console.log('  Msgs    : ' + messages.length);
 
-    // Buscar contato no HubSpot
     const contact = await findContact(phone, contactName);
 
     if (!contact) {
-      console.log(`   ❌ Contato não encontrado no HubSpot`);
+      console.log('  Contato nao encontrado no HubSpot');
       return res.status(404).json({
         success: false,
-        error: `Contato "${contactName}" não encontrado no HubSpot. Verifique se o número ${phone} está cadastrado.`
+        error: `Contato "${contactName}" nao encontrado no HubSpot. Verifique se o numero ${phone} esta cadastrado.`
       });
     }
 
-    console.log(`   ✅ Contato encontrado: ID ${contact.id}`);
+    console.log('  Contato encontrado: ID ' + contact.id);
 
-    // Formatar e salvar nota
     const noteBody = formatConversation(contactName, messages);
     const note     = await createNote(contact.id, noteBody);
 
-    console.log(`   ✅ Nota criada: ID ${note.id}`);
+    console.log('  Nota criada: ID ' + note.id);
 
     return res.json({
       success: true,
@@ -170,20 +140,13 @@ app.post('/api/whatsapp-to-hubspot', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Erro:', err.response?.data || err.message);
+    console.error('Erro: ' + (err.response?.data?.message || err.message));
 
-    // Erros específicos do HubSpot
     if (err.response?.status === 401) {
-      return res.status(401).json({
-        success: false,
-        error: 'Token inválido ou expirado. Verifique o HUBSPOT_API_KEY no arquivo .env'
-      });
+      return res.status(401).json({ success: false, error: 'Token invalido ou expirado. Verifique o arquivo .env' });
     }
     if (err.response?.status === 403) {
-      return res.status(403).json({
-        success: false,
-        error: 'Permissão negada. Verifique os escopos do Private App no HubSpot.'
-      });
+      return res.status(403).json({ success: false, error: 'Permissao negada. Verifique os escopos do Private App no HubSpot.' });
     }
 
     return res.status(500).json({
@@ -202,9 +165,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
     token_configured: tokenOk,
-    message: tokenOk
-      ? 'Middleware pronto para uso!'
-      : '⚠️ Token não configurado. Verifique o arquivo .env'
+    message: tokenOk ? 'Middleware pronto para uso!' : 'Token nao configurado. Verifique o arquivo .env'
   });
 });
 
@@ -213,18 +174,24 @@ app.get('/health', (req, res) => {
 // ─────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('\n╔══════════════════════════════════════╗');
-  console.log('║   WhatsApp → HubSpot Middleware      ║');
-  console.log('╚══════════════════════════════════════╝');
-  console.log(`\n🚀 Servidor rodando em http://localhost:${PORT}`);
-  console.log(`🔍 Health check: http://localhost:${PORT}/health`);
-  console.log(`📡 Endpoint   : POST http://localhost:${PORT}/api/whatsapp-to-hubspot`);
+  console.log('');
+  console.log('==========================================');
+  console.log('  WhatsApp para HubSpot CRM - Middleware');
+  console.log('==========================================');
+  console.log('');
+  console.log('Servidor rodando em http://localhost:' + PORT);
+  console.log('Health check : http://localhost:' + PORT + '/health');
+  console.log('Endpoint     : POST http://localhost:' + PORT + '/api/whatsapp-to-hubspot');
 
   if (!HUBSPOT_TOKEN || !HUBSPOT_TOKEN.startsWith('pat-')) {
-    console.log('\n⚠️  ATENÇÃO: Token HubSpot não configurado!');
-    console.log('   Crie o arquivo .env com: HUBSPOT_API_KEY=pat-na1-...');
+    console.log('');
+    console.log('ATENCAO: Token HubSpot nao configurado!');
+    console.log('Edite o arquivo .env e adicione seu token.');
   } else {
-    console.log('\n✅ Token HubSpot configurado com sucesso!');
+    console.log('');
+    console.log('Token HubSpot configurado com sucesso!');
   }
-  console.log('\nAguardando requisições...\n');
+  console.log('');
+  console.log('Aguardando requisicoes...');
+  console.log('');
 });
