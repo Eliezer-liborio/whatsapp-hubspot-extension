@@ -1,150 +1,248 @@
-// content.js
-// Script injetado no WhatsApp Web para capturar conversas e enviar ao HubSpot
+// content.js — WhatsApp para HubSpot CRM
+// Injeta botão no header da conversa, ao lado dos ícones nativos
 
 const MIDDLEWARE_URL = 'http://localhost:3000/api/whatsapp-to-hubspot';
+const BTN_ID = 'hubspot-save-btn';
 
 // ─────────────────────────────────────────────
-// Adiciona botão "Salvar no HubSpot" ao header
+// Observer: detecta abertura/troca de conversa
 // ─────────────────────────────────────────────
-function addExportButton() {
-  const header = document.querySelector('header');
-  if (!header || document.getElementById('hubspot-export-btn')) return;
+const observer = new MutationObserver(() => {
+  injectButton();
+});
+observer.observe(document.body, { childList: true, subtree: true });
+setTimeout(injectButton, 2000);
 
+// ─────────────────────────────────────────────
+// Injeta o botão no header da conversa
+// ─────────────────────────────────────────────
+function injectButton() {
+  if (document.getElementById(BTN_ID)) return;
+
+  // Tenta encontrar o container de ícones do header (lado direito)
+  const iconContainerSelectors = [
+    'div[data-testid="conversation-header-utils"]',
+    'header div._amid',
+    '#main header > div > div:last-child',
+    '#main header > div:last-child',
+  ];
+
+  let iconContainer = null;
+  for (const sel of iconContainerSelectors) {
+    iconContainer = document.querySelector(sel);
+    if (iconContainer) break;
+  }
+
+  // Fallback: usa o próprio header
+  if (!iconContainer) {
+    const header = document.querySelector('#main header') || document.querySelector('header');
+    if (!header) return;
+    iconContainer = header;
+  }
+
+  // Cria o botão
   const btn = document.createElement('button');
-  btn.id        = 'hubspot-export-btn';
-  btn.innerHTML = '📤 Salvar no HubSpot';
-  btn.className = 'hubspot-btn';
-  btn.title     = 'Exportar conversa para a timeline do HubSpot CRM';
+  btn.id = BTN_ID;
+  btn.title = 'Salvar conversa no HubSpot CRM';
+  btn.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background-color: #FF7A59;
+    color: #ffffff;
+    border: none;
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    margin: 0 8px;
+    white-space: nowrap;
+    transition: background-color 0.2s, transform 0.1s;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    letter-spacing: 0.2px;
+    vertical-align: middle;
+    line-height: 1;
+  `;
 
-  btn.onclick = async () => {
-    const data = extractConversation();
+  // Ícone SVG de upload
+  const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>`;
+  btn.innerHTML = svgIcon + ' Salvar no HubSpot';
 
-    if (!data || data.messages.length === 0) {
-      showToast('⚠️ Nenhuma mensagem encontrada nesta conversa.', 'warning');
-      return;
-    }
+  // Hover
+  btn.addEventListener('mouseenter', () => {
+    btn.style.backgroundColor = '#e8623a';
+    btn.style.transform = 'scale(1.04)';
+  });
+  btn.addEventListener('mouseleave', () => {
+    btn.style.backgroundColor = '#FF7A59';
+    btn.style.transform = 'scale(1)';
+  });
 
-    btn.disabled  = true;
-    btn.innerHTML = '⏳ Enviando...';
+  // Clique
+  btn.addEventListener('click', handleSave);
 
-    try {
-      const response = await fetch(MIDDLEWARE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        showToast(`✅ ${result.message}`, 'success');
-        btn.innerHTML = '✅ Salvo!';
-        setTimeout(() => { btn.innerHTML = '📤 Salvar no HubSpot'; btn.disabled = false; }, 3000);
-      } else {
-        showToast(`❌ ${result.error}`, 'error');
-        btn.innerHTML = '📤 Salvar no HubSpot';
-        btn.disabled  = false;
-      }
-    } catch (err) {
-      showToast('❌ Middleware offline. Inicie o servidor Node.js.', 'error');
-      console.error('[HubSpot Extension] Erro ao conectar ao middleware:', err);
-      btn.innerHTML = '📤 Salvar no HubSpot';
-      btn.disabled  = false;
-    }
-  };
-
-  header.appendChild(btn);
+  // Insere no início do container de ícones (lado esquerdo dos ícones nativos)
+  iconContainer.insertBefore(btn, iconContainer.firstChild);
 }
 
 // ─────────────────────────────────────────────
-// Extrai dados da conversa aberta
+// Captura nome e telefone do contato
 // ─────────────────────────────────────────────
-function extractConversation() {
+function getContactInfo() {
+  const nameSelectors = [
+    'header span[data-testid="conversation-info-header-chat-title"]',
+    'header span[dir="auto"]',
+    '#main header span[dir="auto"]',
+  ];
+
+  let name = null;
+  for (const sel of nameSelectors) {
+    const el = document.querySelector(sel);
+    if (el && el.innerText.trim()) {
+      name = el.innerText.trim();
+      break;
+    }
+  }
+
+  // Tenta extrair telefone do subtítulo
+  const subtitleEl = document.querySelector(
+    'header span[data-testid="conversation-info-header-subtitle"]'
+  );
+  let phone = subtitleEl ? subtitleEl.innerText.replace(/\s/g, '') : null;
+
+  // Se o próprio nome for um número de telefone
+  if (!phone && name && /^\+?[\d\s\-().]+$/.test(name)) {
+    phone = name.replace(/\D/g, '');
+  }
+
+  return { name: name || 'Desconhecido', phone };
+}
+
+// ─────────────────────────────────────────────
+// Captura mensagens da conversa
+// ─────────────────────────────────────────────
+function getMessages() {
   const messages = [];
 
-  // Seletores baseados em data-testid (mais estáveis)
   const msgElements = document.querySelectorAll(
     'div[data-testid="msg-container"], div.message-in, div.message-out'
   );
 
-  msgElements.forEach(msg => {
-    // Texto da mensagem
-    const textEl = msg.querySelector(
-      'span.selectable-text, [data-testid="conversation-compose-box-input"], .copyable-text span'
-    );
-    const text = textEl ? textEl.innerText.trim() : '';
+  msgElements.forEach(el => {
+    const textEl =
+      el.querySelector('span[data-testid="msg-text"]') ||
+      el.querySelector('span.selectable-text') ||
+      el.querySelector('.copyable-text span');
 
-    // Horário
-    const timeEl = msg.querySelector("span[data-testid='msg-time']");
-    const time   = timeEl ? timeEl.innerText.trim() : '';
+    const timeEl = el.querySelector("span[data-testid='msg-time']");
 
-    // Remetente
-    const from = msg.classList.contains('message-out') ? 'vendedor' : 'cliente';
+    const isOut = el.classList.contains('message-out');
 
-    if (text) {
-      messages.push({ from, text, time });
+    if (textEl && textEl.innerText.trim()) {
+      messages.push({
+        text: textEl.innerText.trim(),
+        time: timeEl ? timeEl.innerText.trim() : '',
+        from: isOut ? 'vendedor' : 'cliente',
+      });
     }
   });
 
-  // Nome do contato no header
-  const nameEl = document.querySelector(
-    'header span[data-testid="conversation-info-header-chat-title"], header span[dir="auto"]'
-  );
-  const contactName = nameEl ? nameEl.innerText.trim() : 'Desconhecido';
-
-  // Tenta extrair número do subtítulo do header
-  const subtitleEl = document.querySelector(
-    'header span[data-testid="conversation-info-header-subtitle"]'
-  );
-  const phone = subtitleEl ? subtitleEl.innerText.replace(/\s/g, '') : '';
-
-  return { contactName, phone, messages };
+  return messages;
 }
 
 // ─────────────────────────────────────────────
-// Toast de notificação visual
+// Ação do botão
 // ─────────────────────────────────────────────
-function showToast(message, type = 'info') {
+async function handleSave() {
+  const btn = document.getElementById(BTN_ID);
+  if (!btn) return;
+
+  const { name, phone } = getContactInfo();
+  const messages = getMessages();
+
+  if (messages.length === 0) {
+    showToast('Nenhuma mensagem encontrada nesta conversa.', 'error');
+    return;
+  }
+
+  // Estado de carregamento
+  const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>`;
+
+  btn.innerHTML = 'Salvando...';
+  btn.disabled = true;
+  btn.style.backgroundColor = '#aaa';
+  btn.style.cursor = 'not-allowed';
+
+  try {
+    const res = await fetch(MIDDLEWARE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contactName: name, phone, messages }),
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      showToast('Conversa salva no HubSpot com sucesso!', 'success');
+      btn.innerHTML = svgIcon + ' Salvo!';
+      btn.style.backgroundColor = '#25D366';
+      setTimeout(() => {
+        btn.innerHTML = svgIcon + ' Salvar no HubSpot';
+        btn.style.backgroundColor = '#FF7A59';
+        btn.disabled = false;
+        btn.style.cursor = 'pointer';
+      }, 3000);
+    } else {
+      showToast(data.error || 'Erro ao salvar a conversa.', 'error');
+      btn.innerHTML = svgIcon + ' Salvar no HubSpot';
+      btn.style.backgroundColor = '#FF7A59';
+      btn.disabled = false;
+      btn.style.cursor = 'pointer';
+    }
+  } catch (err) {
+    showToast('Middleware offline. Inicie o servidor Node.js.', 'error');
+    btn.innerHTML = svgIcon + ' Salvar no HubSpot';
+    btn.style.backgroundColor = '#FF7A59';
+    btn.disabled = false;
+    btn.style.cursor = 'pointer';
+  }
+}
+
+// ─────────────────────────────────────────────
+// Toast de notificação
+// ─────────────────────────────────────────────
+function showToast(message, type = 'success') {
   const existing = document.getElementById('hubspot-toast');
   if (existing) existing.remove();
-
-  const colors = {
-    success: '#25D366',
-    error:   '#e74c3c',
-    warning: '#f39c12',
-    info:    '#3498db'
-  };
 
   const toast = document.createElement('div');
   toast.id = 'hubspot-toast';
   toast.innerText = message;
   toast.style.cssText = `
     position: fixed;
-    bottom: 30px;
+    bottom: 28px;
     left: 50%;
     transform: translateX(-50%);
-    background: ${colors[type] || colors.info};
+    background-color: ${type === 'success' ? '#25D366' : '#e53935'};
     color: white;
-    padding: 12px 24px;
-    border-radius: 8px;
+    padding: 12px 28px;
+    border-radius: 24px;
     font-size: 14px;
-    font-weight: bold;
+    font-weight: 600;
+    font-family: inherit;
     z-index: 99999;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    transition: opacity 0.5s;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    opacity: 1;
+    transition: opacity 0.4s;
+    max-width: 440px;
+    text-align: center;
   `;
+
   document.body.appendChild(toast);
-  setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 500); }, 4000);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 400);
+  }, 4000);
 }
-
-// ─────────────────────────────────────────────
-// Observer: detecta abertura de conversas
-// ─────────────────────────────────────────────
-const observer = new MutationObserver(() => {
-  addExportButton();
-});
-
-observer.observe(document.body, { childList: true, subtree: true });
-
-// Tenta adicionar na carga inicial
-setTimeout(addExportButton, 2000);
