@@ -1,11 +1,12 @@
 // content.js — WhatsApp para HubSpot CRM
-// Botão fixo no topo direito — funciona no WhatsApp pessoal e Business
+// Extração de telefone via data-id das mensagens (fonte mais confiável)
+// Funciona mesmo para contatos salvos na agenda
 
 const MIDDLEWARE_URL = 'http://localhost:3000/api/whatsapp-to-hubspot';
 const BTN_ID = 'hubspot-save-btn';
 
 // ─────────────────────────────────────────────
-// Cria o botão fixo
+// Cria o botão fixo no topo direito
 // ─────────────────────────────────────────────
 function createFixedButton() {
   if (document.getElementById(BTN_ID)) return;
@@ -14,7 +15,13 @@ function createFixedButton() {
   btn.id = BTN_ID;
   btn.title = 'Salvar conversa no HubSpot CRM';
 
-  const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>`;
+  const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+    style="flex-shrink:0">
+    <polyline points="16 16 12 12 8 16"></polyline>
+    <line x1="12" y1="12" x2="12" y2="21"></line>
+    <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
+  </svg>`;
 
   btn.innerHTML = svgIcon + '<span id="hubspot-btn-text">Salvar no HubSpot</span>';
 
@@ -43,50 +50,127 @@ function createFixedButton() {
   `;
 
   btn.addEventListener('mouseenter', () => {
-    btn.style.backgroundColor = '#e8623a';
-    btn.style.transform = 'scale(1.05)';
-    btn.style.boxShadow = '0 5px 16px rgba(0,0,0,0.35)';
+    if (!btn.disabled) {
+      btn.style.backgroundColor = '#e8623a';
+      btn.style.transform = 'scale(1.05)';
+      btn.style.boxShadow = '0 5px 16px rgba(0,0,0,0.35)';
+    }
   });
   btn.addEventListener('mouseleave', () => {
-    btn.style.backgroundColor = currentColor;
     btn.style.transform = 'scale(1)';
     btn.style.boxShadow = '0 3px 10px rgba(0,0,0,0.30)';
+    if (!btn.disabled) btn.style.backgroundColor = '#FF7A59';
   });
 
   btn.addEventListener('click', handleSave);
   document.body.appendChild(btn);
 }
 
-let currentColor = '#FF7A59';
+// ─────────────────────────────────────────────
+// ESTRATÉGIA PRINCIPAL: extrai número do
+// atributo data-id das mensagens.
+//
+// O WhatsApp Web armazena em data-id o ID único
+// de cada mensagem no formato:
+//   "false_5566996215988@c.us_XXXXXXXX"  (recebida)
+//   "true_5566996215988@c.us_XXXXXXXX"   (enviada)
+//
+// O número está SEMPRE presente aqui, mesmo
+// quando o contato está salvo na agenda.
+// ─────────────────────────────────────────────
+function extractPhoneFromDataId() {
+  // Busca mensagens RECEBIDAS (false_ = mensagem do contato)
+  const received = document.querySelectorAll('[data-id^="false_"]');
+  for (const el of received) {
+    const dataId = el.getAttribute('data-id') || '';
+    const match = dataId.match(/false_(\d+)@c\.us/);
+    if (match && match[1].length >= 8) {
+      return match[1]; // retorna somente dígitos
+    }
+  }
 
-// ─────────────────────────────────────────────
-// Verifica se uma string parece um telefone valido
-// ─────────────────────────────────────────────
-function looksLikePhone(str) {
-  if (!str) return false;
-  const digits = str.replace(/\D/g, '');
-  return digits.length >= 8 && digits.length <= 15;
+  // Fallback: mensagens enviadas (true_ = mensagem do usuário)
+  // Neste caso o número é do DESTINATÁRIO
+  const sent = document.querySelectorAll('[data-id^="true_"]');
+  for (const el of sent) {
+    const dataId = el.getAttribute('data-id') || '';
+    const match = dataId.match(/true_(\d+)@c\.us/);
+    if (match && match[1].length >= 8) {
+      return match[1];
+    }
+  }
+
+  return null;
 }
 
 // ─────────────────────────────────────────────
-// Captura nome e telefone do contato
-// Estrategia: busca o numero diretamente nas
-// mensagens (campo data-pre-plain-text) e no header
+// ESTRATÉGIA 2: extrai número da URL da página
+// Funciona quando a conversa é aberta via link
+// https://web.whatsapp.com/send?phone=55...
 // ─────────────────────────────────────────────
-function getContactInfo() {
-  let name = null;
-  let phone = null;
+function extractPhoneFromURL() {
+  try {
+    const url = new URL(window.location.href);
+    const phoneParam = url.searchParams.get('phone');
+    if (phoneParam) {
+      const digits = phoneParam.replace(/\D/g, '');
+      if (digits.length >= 8) return digits;
+    }
+  } catch (e) {}
+  return null;
+}
 
-  // ── NOME: tenta varios seletores ──
-  const nameSelectors = [
+// ─────────────────────────────────────────────
+// ESTRATÉGIA 3: extrai número do subtítulo
+// do header (funciona para contatos NÃO salvos)
+// ─────────────────────────────────────────────
+function extractPhoneFromHeader() {
+  const selectors = [
+    'span[data-testid="conversation-info-header-subtitle"]',
+    '#main header span[dir="auto"]:nth-of-type(2)',
+    'header span[title]',
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el) {
+      const txt = el.innerText.trim();
+      const digits = txt.replace(/\D/g, '');
+      if (digits.length >= 8 && digits.length <= 15) return digits;
+    }
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────
+// ESTRATÉGIA 4: extrai número do atributo
+// data-pre-plain-text das mensagens
+// Formato: "[hora, data] +55 66 99999-9999:"
+// ─────────────────────────────────────────────
+function extractPhoneFromPreText() {
+  const els = document.querySelectorAll('[data-pre-plain-text]');
+  for (const el of els) {
+    const preText = el.getAttribute('data-pre-plain-text') || '';
+    // Extrai número após "] " e antes de ":"
+    const match = preText.match(/\]\s*(\+?[\d\s\-().]{8,})\s*:/);
+    if (match) {
+      const digits = match[1].replace(/\D/g, '');
+      if (digits.length >= 8 && digits.length <= 15) return digits;
+    }
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────
+// Captura nome do contato
+// ─────────────────────────────────────────────
+function getContactName() {
+  const selectors = [
     'span[data-testid="conversation-info-header-chat-title"]',
     '#main header span[dir="auto"]:first-of-type',
     '#main header div[data-testid="conversation-info-header"] span[dir="auto"]',
     'header span[dir="auto"]',
-    'div[data-testid="conversation-header"] span[dir="auto"]',
   ];
-
-  for (const sel of nameSelectors) {
+  for (const sel of selectors) {
     const els = document.querySelectorAll(sel);
     for (const el of els) {
       const txt = el.innerText.trim();
@@ -95,61 +179,27 @@ function getContactInfo() {
         txt.length > 1 &&
         !['online', 'offline', 'digitando...', 'gravando áudio...', 'gravando audio...'].includes(lower)
       ) {
-        name = txt;
-        break;
-      }
-    }
-    if (name) break;
-  }
-
-  // ── TELEFONE: estrategia 1 — subtitulo do header ──
-  const subtitleSelectors = [
-    'span[data-testid="conversation-info-header-subtitle"]',
-    '#main header span[dir="auto"]:nth-of-type(2)',
-    'header span[title]',
-  ];
-
-  for (const sel of subtitleSelectors) {
-    const el = document.querySelector(sel);
-    if (el) {
-      const txt = el.innerText.trim();
-      if (looksLikePhone(txt)) {
-        phone = txt;
-        break;
+        return txt;
       }
     }
   }
+  return 'Desconhecido';
+}
 
-  // ── TELEFONE: estrategia 2 — nome e o proprio numero ──
-  if (!phone && name && looksLikePhone(name)) {
-    phone = name;
-  }
+// ─────────────────────────────────────────────
+// Orquestra todas as estratégias de captura
+// ─────────────────────────────────────────────
+function getContactInfo() {
+  const name = getContactName();
 
-  // ── TELEFONE: estrategia 3 — busca em data-pre-plain-text das mensagens ──
-  // O WhatsApp coloca o numero no atributo data-pre-plain-text no formato:
-  // "[HH:MM, DD/MM/YYYY] +55 11 99999-9999:"
-  if (!phone) {
-    const copyables = document.querySelectorAll('[data-pre-plain-text]');
-    for (const el of copyables) {
-      const preText = el.getAttribute('data-pre-plain-text') || '';
-      // Extrai o numero do formato "[hora, data] numero:"
-      const match = preText.match(/\]\s*(\+?[\d\s\-().]{8,})\s*:/);
-      if (match && looksLikePhone(match[1])) {
-        phone = match[1].trim();
-        break;
-      }
-    }
-  }
+  // Tenta cada estratégia em ordem de confiabilidade
+  const phone =
+    extractPhoneFromDataId()   ||  // ← mais confiável
+    extractPhoneFromURL()      ||
+    extractPhoneFromHeader()   ||
+    extractPhoneFromPreText(); //  ← menos confiável
 
-  // ── TELEFONE: estrategia 4 — titulo da pagina ──
-  if (!phone) {
-    const titleMatch = document.title.match(/(\+?[\d\s\-().]{10,})/);
-    if (titleMatch && looksLikePhone(titleMatch[1])) {
-      phone = titleMatch[1].trim();
-    }
-  }
-
-  return { name: name || 'Desconhecido', phone };
+  return { name, phone };
 }
 
 // ─────────────────────────────────────────────
@@ -158,7 +208,7 @@ function getContactInfo() {
 function getMessages() {
   const messages = [];
 
-  // Metodo 1: data-pre-plain-text (mais confiavel, presente em todas as versoes)
+  // Método 1: data-pre-plain-text (mais estruturado)
   const copyables = document.querySelectorAll('[data-pre-plain-text]');
   if (copyables.length > 0) {
     copyables.forEach(el => {
@@ -166,10 +216,8 @@ function getMessages() {
       const timeMatch = preText.match(/\[(\d{2}:\d{2})/);
       const time = timeMatch ? timeMatch[1] : '';
 
-      // Detecta se e mensagem enviada (message-out) ou recebida
       const isOut = !!el.closest('div.message-out') ||
-                    !!el.closest('[data-testid="msg-container-out"]') ||
-                    !!el.closest('div[class*="_akbu"]');
+                    !!el.closest('[data-testid="msg-container-out"]');
 
       const textEl =
         el.querySelector('span[data-testid="msg-text"]') ||
@@ -178,30 +226,23 @@ function getMessages() {
 
       const txt = textEl.innerText.trim();
       if (txt) {
-        messages.push({
-          text: txt,
-          time,
-          from: isOut ? 'vendedor' : 'cliente',
-        });
+        messages.push({ text: txt, time, from: isOut ? 'vendedor' : 'cliente' });
       }
     });
-    return messages;
+    if (messages.length > 0) return messages;
   }
 
-  // Metodo 2: seletores de container de mensagem
+  // Método 2: containers de mensagem
   const msgElements = document.querySelectorAll(
     'div[data-testid="msg-container"], div.message-in, div.message-out'
   );
-
   msgElements.forEach(el => {
     const textEl =
       el.querySelector('span[data-testid="msg-text"]') ||
       el.querySelector('span.selectable-text') ||
       el.querySelector('.copyable-text span');
-
     const timeEl = el.querySelector("span[data-testid='msg-time']");
     const isOut  = el.classList.contains('message-out');
-
     if (textEl && textEl.innerText.trim()) {
       messages.push({
         text: textEl.innerText.trim(),
@@ -233,8 +274,7 @@ async function handleSave() {
   // Estado: carregando
   btnText.innerText = 'Salvando...';
   btn.disabled = true;
-  currentColor = '#aaaaaa';
-  btn.style.backgroundColor = currentColor;
+  btn.style.backgroundColor = '#aaaaaa';
   btn.style.cursor = 'not-allowed';
 
   try {
@@ -249,29 +289,21 @@ async function handleSave() {
     if (data.success) {
       showToast('Conversa salva no HubSpot!', 'success');
       btnText.innerText = 'Salvo!';
-      currentColor = '#25D366';
-      btn.style.backgroundColor = currentColor;
-      setTimeout(() => {
-        btnText.innerText = 'Salvar no HubSpot';
-        currentColor = '#FF7A59';
-        btn.style.backgroundColor = currentColor;
-        btn.disabled = false;
-        btn.style.cursor = 'pointer';
-      }, 3000);
+      btn.style.backgroundColor = '#25D366';
+      setTimeout(() => resetButton(btn, btnText), 3000);
     } else {
       showToast(data.error || 'Erro ao salvar.', 'error');
-      reset(btn, btnText);
+      resetButton(btn, btnText);
     }
   } catch (err) {
-    showToast('Middleware offline. Inicie o servidor Node.js.', 'error');
-    reset(btn, btnText);
+    showToast('Middleware offline. Inicie o servidor Node.js (start.bat).', 'error');
+    resetButton(btn, btnText);
   }
 }
 
-function reset(btn, btnText) {
+function resetButton(btn, btnText) {
   btnText.innerText = 'Salvar no HubSpot';
-  currentColor = '#FF7A59';
-  btn.style.backgroundColor = currentColor;
+  btn.style.backgroundColor = '#FF7A59';
   btn.disabled = false;
   btn.style.cursor = 'pointer';
 }
@@ -305,7 +337,6 @@ function showToast(message, type = 'success') {
     max-width: 480px;
     text-align: center;
   `;
-
   document.body.appendChild(toast);
   setTimeout(() => {
     toast.style.opacity = '0';
@@ -318,9 +349,8 @@ function showToast(message, type = 'success') {
 // ─────────────────────────────────────────────
 createFixedButton();
 
+// Recria o botão se o DOM for modificado (SPA navigation)
 const observer = new MutationObserver(() => {
-  if (!document.getElementById(BTN_ID)) {
-    createFixedButton();
-  }
+  if (!document.getElementById(BTN_ID)) createFixedButton();
 });
 observer.observe(document.body, { childList: true, subtree: false });
